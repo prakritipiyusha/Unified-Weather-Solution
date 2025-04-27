@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Real-Time Weather Chart</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      background-color: #f8f9fa;
+      text-align: center;
+    }
+    #chart-container {
+      width: 90vw;
+      height: 60vh;
+      margin: 20px auto;
+      padding: 15px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+    #latest-values {
+      font-size: 14px;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Real-Time Weather Data</h2>
+  <p id="location-display">Location: Loading...</p>
+  <p id="latest-values">Fetching latest data...</p>
+  
+  <div id="chart-container">
+    <canvas id="weatherChart"></canvas>
+  </div>
+
+  <script>
+    // Optimized parameter labels.
+    const parameters = {
+      temp: "Temperature (°C)",
+      dewpoint: "Dew Point (°C)",
+      wind: "Wind Speed (km/h)",
+      windGust: "Wind Gust (km/h)",
+      precip: "Precipitation (mm)",
+      pressure: "Pressure (hPa)",
+      humidity: "Relative Humidity (%)",
+      cloudCover: "Cloud Cover (%)"
+    };
+
+    // Assign colors.
+    const colors = {
+      temp: "rgba(255, 99, 132, 0.7)",
+      dewpoint: "rgba(255, 159, 64, 0.7)",
+      wind: "rgba(153, 102, 255, 0.7)",
+      windGust: "rgba(255, 205, 86, 0.7)",
+      precip: "rgba(54, 162, 235, 0.7)",
+      pressure: "rgba(102, 0, 204, 0.7)",
+      humidity: "rgba(0, 0, 0, 0.7)",
+      cloudCover: "rgba(0, 153, 76, 0.7)"
+    };
+
+    // Create datasets for each parameter.
+    const datasets = Object.keys(parameters).map(param => ({
+      label: parameters[param],
+      backgroundColor: colors[param],
+      data: []
+    }));
+
+    const ctx = document.getElementById('weatherChart').getContext('2d');
+    const weatherChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: [],
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          title: { display: true, text: 'Real-Time Weather Data' }
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'Time (HH:mm)' },
+            grid: { display: false }
+          },
+          y: {
+            title: { display: true, text: 'Value' },
+            grid: { color: "#eee" }
+          }
+        }
+      }
+    });
+
+    const ws = new WebSocket("ws://localhost:8081");
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      console.log("Received WebSocket data:", data);
+
+      if (data.place_name) {
+        document.getElementById('location-display').textContent = `Location: ${data.place_name}`;
+      }
+
+      updateReadableValues(data);
+      updateChart(data);
+    };
+
+    function updateChart(data) {
+      // Format timestamp as HH:mm.
+      const timestamp = new Date(data.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+      if (weatherChart.data.labels.length >= 5) {
+        weatherChart.data.labels.shift();
+        weatherChart.data.datasets.forEach(dataset => dataset.data.shift());
+      }
+
+      weatherChart.data.labels.push(timestamp);
+      weatherChart.data.datasets.forEach(dataset => {
+        const key = Object.keys(parameters).find(k => parameters[k] === dataset.label);
+        dataset.data.push(data[key] !== undefined ? data[key] : null);
+      });
+
+      weatherChart.update();
+    }
+
+    function updateReadableValues(data) {
+      let formattedValues = [];
+
+      Object.keys(parameters).forEach(param => {
+        let value = data[param];
+        value = value !== null && value !== undefined ? parseFloat(value).toFixed(2) : "N/A";
+        formattedValues.push(`${parameters[param]}: ${value}`);
+      });
+
+      document.getElementById("latest-values").innerHTML = formattedValues.join("<br>");
+    }
+  </script>
+</body>
+</html>

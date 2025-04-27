@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Forecast Data</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    /* Header Navigation */
+    header {
+      background: #0078d7;
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      color: #fff;
+    }
+    header a {
+      color: #fff;
+      text-decoration: none;
+      margin-right: 20px;
+      font-weight: bold;
+    }
+    header a:hover {
+      text-decoration: underline;
+    }
+    #map { height: 100vh; width: 100%; }
+    #location-panel {
+      position: absolute;
+      top: 60px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      z-index: 1000;
+      width: 300px;
+      border-radius: 5px;
+    }
+    #location-name { font-weight: bold; font-size: 16px; margin-bottom: 10px; }
+    #search { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 14px; }
+    /* Dropdown for parameter selection */
+    #parameter-select {
+      width: 100%;
+      padding: 5px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    #get-forecast {
+      background-color: #0078d7;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      cursor: pointer;
+      margin-bottom: 10px;
+      border-radius: 3px;
+    }
+    #get-forecast:hover { background-color: #005bb5; }
+    
+    /* Draggable Chart Container */
+    #chart-container {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      width: 400px;
+      height: 300px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      resize: both;
+    }
+    /* Header for dragging */
+    #chart-header {
+      cursor: grab;
+      background: #0078d7;
+      color: white;
+      padding: 8px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #toggle-chart {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #chart-container canvas {
+      flex-grow: 1;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="index.html">Home</a>
+    <a href="forecast.html">Forecast</a>
+  </header>
+  <div id="map"></div>
+  <div id="location-panel">
+      <h2 id="location-name">Firoz Shah Road, Connaught Place</h2>
+      <input type="text" id="search" placeholder="Search">
+      <p>Latitude: <span id="lat">28.62103</span></p>
+      <p>Longitude: <span id="lng">77.21365</span></p>
+      <!-- Dropdown to select parameter -->
+      <select id="parameter-select">
+        <option value="temp">Temperature (°C)</option>
+        <option value="dewpoint">Dew Point (°C)</option>
+        <option value="wind">Wind Speed (km/h)</option>
+        <option value="windGust">Wind Gust (km/h)</option>
+        <option value="precip">Precipitation (mm)</option>
+        <option value="pressure">Pressure (hPa)</option>
+        <option value="humidity">Humidity (%)</option>
+        <option value="cloudCover">Cloud Cover (%)</option>
+      </select>
+      <button id="get-forecast">Get Forecast</button>
+  </div>
+
+  <!-- Draggable Chart Container -->
+  <div id="chart-container">
+    <div id="chart-header">
+      <span>📊 5-Day Forecast Chart</span>
+      <button id="toggle-chart">−</button>
+    </div>
+    <canvas id="forecastChart"></canvas>
+  </div>
+
+  <!-- Load Leaflet and Chart.js libraries -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <script>
+    // ----------------- Map and Location Panel -----------------
+    var map = L.map('map').setView([28.62103, 77.21365], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    var marker = L.marker([28.62103, 77.21365]).addTo(map);
+    var currentLat = 28.62103, currentLng = 77.21365;
+    document.getElementById('lat').textContent = currentLat.toFixed(5);
+    document.getElementById('lng').textContent = currentLng.toFixed(5);
+    reverseGeocode(currentLat, currentLng);
+
+    map.on('click', function(e) {
+      if (marker) { map.removeLayer(marker); }
+      marker = L.marker(e.latlng).addTo(map);
+      currentLat = e.latlng.lat;
+      currentLng = e.latlng.lng;
+      document.getElementById('lat').textContent = currentLat.toFixed(5);
+      document.getElementById('lng').textContent = currentLng.toFixed(5);
+      reverseGeocode(currentLat, currentLng);
+    });
+
+    document.getElementById('search').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') { searchPlace(this.value); }
+    });
+
+    function reverseGeocode(lat, lng) {
+      var url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`;
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById('location-name').textContent = data.display_name || 'Location';
+        })
+        .catch(error => {
+          console.error('Reverse geocode error:', error);
+          document.getElementById('location-name').textContent = 'Place name not available';
+        });
+    }
+
+    function searchPlace(query) {
+      var url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=en`;
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          if (data.length > 0) {
+            var lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+            map.setView([lat, lon], 13);
+            if (marker) { map.removeLayer(marker); }
+            marker = L.marker([lat, lon]).addTo(map);
+            currentLat = lat;
+            currentLng = lon;
+            document.getElementById('lat').textContent = lat.toFixed(5);
+            document.getElementById('lng').textContent = lon.toFixed(5);
+            document.getElementById('location-name').textContent = data[0].display_name;
+          } else {
+            alert('Place not found');
+          }
+        })
+        .catch(error => console.error('Search error:', error));
+    }
+
+    // ----------------- Draggable Chart Container Logic -----------------
+    let chartContainer = document.getElementById("chart-container");
+    let header = document.getElementById("chart-header");
+    let toggleButton = document.getElementById("toggle-chart");
+    let isMinimized = false;
+
+    header.onmousedown = function(event) {
+      event.preventDefault();
+      let shiftX = event.clientX - chartContainer.getBoundingClientRect().left;
+      let shiftY = event.clientY - chartContainer.getBoundingClientRect().top;
+      function moveAt(pageX, pageY) {
+        chartContainer.style.left = pageX - shiftX + "px";
+        chartContainer.style.top = pageY - shiftY + "px";
+      }
+      function onMouseMove(event) { moveAt(event.pageX, event.pageY); }
+      document.addEventListener("mousemove", onMouseMove);
+      document.onmouseup = function() {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.onmouseup = null;
+      };
+    };
+
+    header.ondragstart = function() { return false; };
+
+    toggleButton.onclick = function() {
+      if (isMinimized) {
+        chartContainer.style.height = "300px";
+        chartContainer.style.width = "400px";
+        toggleButton.textContent = "−";
+      } else {
+        chartContainer.style.height = "40px";
+        chartContainer.style.width = "200px";
+        toggleButton.textContent = "+";
+      }
+      isMinimized = !isMinimized;
+    };
+
+    // ----------------- Forecast Chart -----------------
+    let forecastChart;
+    const ctx = document.getElementById('forecastChart').getContext('2d');
+
+    // Helper: format a Date object as dd-mm.
+    function formatDateDDMM(dateObj) {
+      const dd = ("0" + dateObj.getDate()).slice(-2);
+      const mm = ("0" + (dateObj.getMonth() + 1)).slice(-2);
+      return dd + "-" + mm;
+    }
+
+    // Group forecast data for the next 5 days for a given parameter.
+    function groupForecastByNext5Days(forecastData, parameter) {
+      const dailyData = {};
+      const today = new Date();
+      const todayStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
+
+      forecastData.forEach(point => {
+        // Adjust timestamp: if needed multiply by 1000 if in seconds.
+        let timestamp = point.timestamp;
+        if (timestamp < 1e12) timestamp *= 1000;
+        const dateObj = new Date(timestamp);
+        const dateStr = dateObj.toISOString().split("T")[0];
+        if (dateStr >= todayStr && point[parameter] !== undefined && point[parameter] !== null) {
+          if(!dailyData[dateStr]) {
+            dailyData[dateStr] = [];
+          }
+          dailyData[dateStr].push(point[parameter]);
+        }
+      });
+      
+      const sortedDays = Object.keys(dailyData).sort();
+      const selectedDays = sortedDays.slice(0, 5);
+      const labels = selectedDays.map(day => {
+        const parts = day.split("-");
+        return parts[2] + "-" + parts[1];
+      });
+      const averages = selectedDays.map(day => {
+        const values = dailyData[day];
+        const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+        return parseFloat(avg.toFixed(2));
+      });
+      return { labels, averages };
+    }
+
+    function updateForecastChart(labels, averages, parameterLabel) {
+      if (forecastChart) {
+        forecastChart.destroy();
+      }
+      forecastChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: `${parameterLabel} (Average)`,
+            data: averages,
+            borderColor: 'rgba(255, 99, 132, 1)',
+            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: true } },
+          scales: { 
+            x: { title: { display: true, text: 'Day (dd-mm)' } }, 
+            y: { title: { display: true, text: parameterLabel } } 
+          }
+        }
+      });
+    }
+
+    async function fetchForecastData(lat, lon, placeName) {
+      const url = 'http://localhost:3001/get-forecast';
+      const body = { lat: lat, lon: lon, placeName: placeName };
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    if (!response.ok) {
+      throw new Error('Forecast API request failed');
+    }
+    const forecastData = await response.json();
+    return forecastData;
+}
+
+    document.getElementById('get-forecast').addEventListener('click', async function() {
+      try {
+        const placeName = document.getElementById('location-name').textContent;
+        const forecastData = await fetchForecastData(currentLat, currentLng, placeName);
+        const selectedParameter = document.getElementById('parameter-select').value;
+        const parameterLabels = {
+          temp: "Temperature (°C)",
+          dewpoint: "Dew Point (°C)",
+          wind: "Wind Speed (km/h)",
+          windGust: "Wind Gust (km/h)",
+          precip: "Precipitation (mm)",
+          pressure: "Pressure (hPa)",
+          humidity: "Humidity (%)",
+          cloudCover: "Cloud Cover (%)"
+        };
+        
+        const { labels, averages } = groupForecastByNext5Days(forecastData, selectedParameter);
+        
+        updateForecastChart(labels, averages, parameterLabels[selectedParameter]);
+      } catch (error) {
+        console.error('Error fetching forecast data:', error);
+      }
+    });
+  </script>
+</body>
+</html>

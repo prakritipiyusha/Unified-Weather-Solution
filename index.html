@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Windy Integration with CSV Export</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    /* Header Navigation */
+    header {
+      background: #0078d7;
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      color: #fff;
+    }
+    header a {
+      color: #fff;
+      text-decoration: none;
+      margin-right: 20px;
+      font-weight: bold;
+    }
+    header a:hover {
+      text-decoration: underline;
+    }
+    #map { height: 100vh; width: 100%; }
+    #location-panel {
+      position: absolute;
+      top: 60px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      z-index: 1000;
+      width: 300px;
+      border-radius: 5px;
+    }
+    #location-name { font-weight: bold; font-size: 16px; margin-bottom: 10px; }
+    #search { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; font-size: 14px; }
+    #get-weather {
+      background-color: #0078d7;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      cursor: pointer;
+      margin-bottom: 10px;
+      border-radius: 3px;
+    }
+    #get-weather:hover { background-color: #005bb5; }
+    #weather-info p, #location-panel p { margin: 5px 0; font-size: 14px; }
+
+    /* Draggable Chart Container */
+    #chart-container {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      width: 400px;
+      height: 300px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      resize: both;
+    }
+    /* Header for dragging */
+    #chart-header {
+      cursor: grab;
+      background: #0078d7;
+      color: white;
+      padding: 8px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #toggle-chart {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #chart-container canvas {
+      flex-grow: 1;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="index.html">Home</a>
+    <a href="forecast.html">Forecast</a>
+  </header>
+  <div id="map"></div>
+  <div id="location-panel">
+      <h2 id="location-name">Firoz Shah Road, Connaught Place</h2>
+      <input type="text" id="search" placeholder="Search">
+      <p>Latitude: <span id="lat">28.62103</span></p>
+      <p>Longitude: <span id="lng">77.21365</span></p>
+      <button id="get-weather">Get Weather</button>
+      <div id="weather-info">
+          <p>Temperature: <span id="temp">undefined°C</span></p>
+          <p>Wind Speed: <span id="wind">undefined km/h</span></p>
+      </div>
+      <p>Cursor: <span id="cursor-coordinates">-, -</span></p>
+  </div>
+
+  <!-- Draggable Chart Container -->
+  <div id="chart-container">
+    <div id="chart-header">
+      <span>📊 Real-Time Weather Chart</span>
+      <button id="toggle-chart">−</button>
+    </div>
+    <canvas id="weatherChart"></canvas>
+  </div>
+
+  <!-- Load Leaflet and Chart.js libraries -->
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <script>
+    // ----------------- Map and Weather Info -----------------
+    var map = L.map('map').setView([28.62103, 77.21365], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    var marker = L.marker([28.62103, 77.21365]).addTo(map);
+    var currentLat = 28.62103, currentLng = 77.21365;
+    document.getElementById('lat').textContent = currentLat.toFixed(5);
+    document.getElementById('lng').textContent = currentLng.toFixed(5);
+    reverseGeocode(currentLat, currentLng);
+
+    map.on('mousemove', function(e) {
+      document.getElementById('cursor-coordinates').textContent = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+    });
+
+    map.on('click', function(e) {
+      if (marker) { map.removeLayer(marker); }
+      marker = L.marker(e.latlng).addTo(map);
+      currentLat = e.latlng.lat;
+      currentLng = e.latlng.lng;
+      document.getElementById('lat').textContent = currentLat.toFixed(5);
+      document.getElementById('lng').textContent = currentLng.toFixed(5);
+      reverseGeocode(currentLat, currentLng);
+      document.getElementById('temp').textContent = 'undefined°C';
+      document.getElementById('wind').textContent = 'undefined km/h';
+    });
+
+    document.getElementById('search').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') { searchPlace(this.value); }
+    });
+
+    document.getElementById('get-weather').addEventListener('click', function() {
+      if (currentLat && currentLng) {
+        fetchWeatherData(currentLat, currentLng)
+          .then(weatherData => {
+            document.getElementById('temp').textContent = `${weatherData.temp !== null ? weatherData.temp.toFixed(2) : 'N/A'}°C`;
+            document.getElementById('wind').textContent = `${weatherData.wind !== null ? weatherData.wind.toFixed(2) : 'N/A'} km/h`;
+            updateChart(weatherData);
+      })
+      .catch(error => {
+        console.error('Error fetching weather data:', error);
+        document.getElementById('temp').textContent = 'undefined°C';
+        document.getElementById('wind').textContent = 'undefined km/h';
+      });
+  } else {
+    alert('Please select a location first');
+  }
+});
+
+    function reverseGeocode(lat, lng) {
+      var url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=en`;
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById('location-name').textContent = data.display_name || 'Unknown place';
+        })
+        .catch(error => {
+          console.error('Reverse geocode error:', error);
+          document.getElementById('location-name').textContent = 'Place name not available';
+        });
+    }
+
+    function searchPlace(query) {
+      var url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&accept-language=en`;
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          if (data.length > 0) {
+            var lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+            map.setView([lat, lon], 13);
+            if (marker) { map.removeLayer(marker); }
+            marker = L.marker([lat, lon]).addTo(map);
+            currentLat = lat;
+            currentLng = lon;
+            document.getElementById('lat').textContent = lat.toFixed(5);
+            document.getElementById('lng').textContent = lon.toFixed(5);
+            document.getElementById('location-name').textContent = data[0].display_name;
+            document.getElementById('temp').textContent = 'undefined°C';
+            document.getElementById('wind').textContent = 'undefined km/h';
+          } else {
+            alert('Place not found');
+          }
+        })
+        .catch(error => console.error('Search error:', error));
+    }
+
+    async function fetchWeatherData(lat, lng) {
+  const url = 'http://localhost:3001/get-weather';
+  const body = {
+    lat: lat,
+    lon: lng,
+        placeName: document.getElementById('location-name').textContent
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+        if (!response.ok) { throw new Error('API request failed'); }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+        throw error;
+  }
+}
+
+
+    // ----------------- Draggable Chart Container & Chart.js -----------------
+    let chartContainer = document.getElementById("chart-container");
+    let header = document.getElementById("chart-header");
+    let toggleButton = document.getElementById("toggle-chart");
+    let isMinimized = false;
+
+    header.onmousedown = function(event) {
+      event.preventDefault();
+      let shiftX = event.clientX - chartContainer.getBoundingClientRect().left;
+      let shiftY = event.clientY - chartContainer.getBoundingClientRect().top;
+      function moveAt(pageX, pageY) {
+        chartContainer.style.left = pageX - shiftX + "px";
+        chartContainer.style.top = pageY - shiftY + "px";
+      }
+      function onMouseMove(event) { moveAt(event.pageX, event.pageY); }
+      document.addEventListener("mousemove", onMouseMove);
+      document.onmouseup = function() {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.onmouseup = null;
+      };
+    };
+
+    header.ondragstart = function() { return false; };
+
+    toggleButton.onclick = function() {
+      if (isMinimized) {
+        chartContainer.style.height = "300px";
+        chartContainer.style.width = "400px";
+        toggleButton.textContent = "−";
+      } else {
+        chartContainer.style.height = "40px";
+        chartContainer.style.width = "200px";
+        toggleButton.textContent = "+";
+      }
+      isMinimized = !isMinimized;
+    };
+
+    // Chart.js initialization for the real-time weather chart.
+    const parameters = {
+      temp: "Temperature (°C)",
+      dewpoint: "Dew Point (°C)",
+      wind: "Wind Speed (km/h)",
+      windGust: "Wind Gust (km/h)",
+      precip: "Precipitation (mm)",
+      pressure: "Pressure (hPa)",
+      humidity: "Relative Humidity (%)",
+      cloudCover: "Cloud Cover (%)"
+    };
+
+    const colors = {
+      temp: "rgba(255, 99, 132, 0.7)",
+      dewpoint: "rgba(255, 159, 64, 0.7)",
+      wind: "rgba(153, 102, 255, 0.7)",
+      windGust: "rgba(255, 205, 86, 0.7)",
+      precip: "rgba(54, 162, 235, 0.7)",
+      pressure: "rgba(102, 0, 204, 0.7)",
+      humidity: "rgba(0, 0, 0, 0.7)",
+      cloudCover: "rgba(0, 153, 76, 0.7)"
+    };
+
+    const datasets = Object.keys(parameters).map(param => ({
+      label: parameters[param],
+      backgroundColor: colors[param],
+      data: []
+    }));
+
+    const ctx = document.getElementById('weatherChart').getContext('2d');
+    const weatherChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: [], datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          title: { display: true, text: 'Real-Time Weather Data' }
+        },
+        scales: {
+          x: { title: { display: true, text: 'Time (HH:mm)' }, grid: { display: false } },
+          y: { title: { display: true, text: 'Value' }, grid: { color: "#eee" } }
+        }
+      }
+    });
+
+    // Function to clear chart data when a new location is selected.
+    function resetChart() {
+      weatherChart.data.labels = [];
+      weatherChart.data.datasets.forEach(dataset => {
+        dataset.data = [];
+      });
+      weatherChart.update();
+    }
+
+    // WebSocket connection for receiving updates.
+    const ws = new WebSocket("ws://localhost:8081");
+    ws.onopen = async function () {
+      console.log("WebSocket connection established");
+      try {
+        const response = await fetch("http://localhost:3001/get-latest-weather");
+        const data = await response.json();
+        updateChart(data);
+      } catch (error) {
+        console.error("Error fetching initial weather data:", error);
+      }
+    };
+
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      console.log("Received WebSocket data:", data);
+      updateChart(data);
+    };
+
+    function updateChart(data) {
+      const timestamp = new Date(data.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      if (weatherChart.data.labels.length >= 5) {
+        weatherChart.data.labels.shift();
+        weatherChart.data.datasets.forEach(dataset => dataset.data.shift());
+      }
+      weatherChart.data.labels.push(timestamp);
+      weatherChart.data.datasets.forEach(dataset => {
+        const key = Object.keys(parameters).find(k => parameters[k] === dataset.label);
+        dataset.data.push(data[key] !== undefined ? data[key] : null);
+      });
+      weatherChart.update();
+    }
+  </script>
+</body>
+</html>
